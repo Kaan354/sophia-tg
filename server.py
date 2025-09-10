@@ -1,46 +1,45 @@
 import os
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from telethon import TelegramClient
 
-# Environment variables from Render dashboard
 API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE_NUMBER = os.getenv("PHONE_NUMBER")
-PHONE_CODE = os.getenv("PHONE_CODE")           # Only set this after you get the SMS
-PHONE_CODE_HASH = os.getenv("PHONE_CODE_HASH") # Set this after first deploy
-PASSWORD = os.getenv("PASSWORD")               # Optional, only if your account has 2FA
 
-# Session file will persist on Render's disk (ephemeral between deploys, but ok if you don’t restart too often)
-SESSION = "my_session"
+SESSION_NAME = "session"
 
 app = FastAPI()
-client = TelegramClient(SESSION, API_ID, API_HASH)
 
+client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 
 @app.on_event("startup")
 async def startup():
     await client.connect()
     if not await client.is_user_authorized():
-        if not PHONE_CODE:
-            # Step 1: ask Telegram to send a code
-            result = await client.send_code_request(PHONE_NUMBER)
-            print("⚠️ Add this to Render Env Vars PHONE_CODE_HASH =", result.phone_code_hash)
-        else:
-            # Step 2: use the code and hash to log in
-            await client.sign_in(
-                phone=PHONE_NUMBER,
-                code=PHONE_CODE,
-                phone_code_hash=PHONE_CODE_HASH
-            )
-            if PASSWORD:
-                await client.sign_in(password=PASSWORD)
+        # Step 1: send code when server starts
+        sent = await client.send_code_request(PHONE_NUMBER)
+        # Store the hash in memory for now (you can persist it if needed)
+        app.state.phone_code_hash = sent.phone_code_hash
+        print("👉 Code sent. Use /verify with the code from Telegram.")
 
+@app.on_event("shutdown")
+async def shutdown():
+    await client.disconnect()
+
+@app.post("/verify")
+async def verify(payload: dict):
+    code = payload.get("code")
+    phone_code_hash = payload.get("phone_code_hash") or getattr(app.state, "phone_code_hash", None)
+
+    if not code or not phone_code_hash:
+        raise HTTPException(status_code=400, detail="Missing code or phone_code_hash")
+
+    try:
+        await client.sign_in(PHONE_NUMBER, code, phone_code_hash=phone_code_hash)
+        return {"status": "ok", "message": "Logged in!"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 @app.get("/")
 async def root():
-    """Check if the client is logged in."""
-    me = await client.get_me()
-    return {
-        "status": "running",
-        "logged_in_as": me.username if me else None
-    }
+    return {"status": "running"}
