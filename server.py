@@ -16,11 +16,9 @@ client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
 async def startup():
     await client.connect()
     if not await client.is_user_authorized():
-        # Step 1: send code when server starts
         sent = await client.send_code_request(PHONE_NUMBER)
-        # Store the hash in memory for now (you can persist it if needed)
         app.state.phone_code_hash = sent.phone_code_hash
-        print("👉 Code sent. Use /verify with the code from Telegram.")
+        print("👉 Code sent. Now call /verify with your Telegram code.")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -29,14 +27,17 @@ async def shutdown():
 @app.post("/verify")
 async def verify(payload: dict):
     code = payload.get("code")
-    phone_code_hash = payload.get("phone_code_hash") or getattr(app.state, "phone_code_hash", None)
 
-    if not code or not phone_code_hash:
-        raise HTTPException(status_code=400, detail="Missing code or phone_code_hash")
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing code")
+
+    phone_code_hash = getattr(app.state, "phone_code_hash", None)
+    if not phone_code_hash:
+        raise HTTPException(status_code=400, detail="No phone_code_hash stored. Restart server to request a new code.")
 
     try:
         await client.sign_in(PHONE_NUMBER, code, phone_code_hash=phone_code_hash)
-        return {"status": "ok", "message": "Logged in!"}
+        return {"status": "ok", "message": "Logged in successfully!"}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
