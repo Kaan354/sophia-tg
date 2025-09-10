@@ -6,11 +6,12 @@ API_ID = int(os.getenv("API_ID"))
 API_HASH = os.getenv("API_HASH")
 PHONE_NUMBER = os.getenv("PHONE_NUMBER")
 
-SESSION_NAME = "session"
+# Save session file inside /data (Render’s persistent disk mount)
+SESSION_PATH = "/data/telegram_session"
 
 app = FastAPI()
 
-client = TelegramClient(SESSION_NAME, API_ID, API_HASH)
+client = TelegramClient(SESSION_PATH, API_ID, API_HASH)
 
 @app.on_event("startup")
 async def startup():
@@ -18,7 +19,7 @@ async def startup():
     if not await client.is_user_authorized():
         sent = await client.send_code_request(PHONE_NUMBER)
         app.state.phone_code_hash = sent.phone_code_hash
-        print("👉 Code sent. Now call /verify with your Telegram code.")
+        print("👉 Code sent to Telegram. Use /verify with your code.")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -37,7 +38,7 @@ async def verify(payload: dict):
 
     try:
         await client.sign_in(PHONE_NUMBER, code, phone_code_hash=phone_code_hash)
-        return {"status": "ok", "message": "Logged in successfully!"}
+        return {"status": "ok", "message": "Logged in successfully! Session saved to disk."}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
